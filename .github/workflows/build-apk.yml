@@ -1,0 +1,75 @@
+name: Build AmarNote APK
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Decode debug keystore
+        run: |
+          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
+            tr -d '\n\r' < debug.keystore.base64 | base64 -d > debug.keystore
+          fi
+
+      - name: Run unit tests & build Debug APK
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmarNote-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Build Signed Release APK (when release secrets are configured)
+        id: release_build
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | tr -d '\n\r' | base64 -d > my-upload-key.jks
+            export KEYSTORE_PATH="$PWD/my-upload-key.jks"
+            gradle :app:assembleRelease --no-daemon
+            rm -f my-upload-key.jks
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release signing secrets not configured; skipping release APK."
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Signed Release APK artifact
+        if: steps.release_build.outputs.built == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmarNote-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
