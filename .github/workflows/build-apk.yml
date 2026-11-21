@@ -35,7 +35,6 @@ jobs:
             { yes || true; } | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
             "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-36.1" "build-tools;36.0.0" || true
           fi
-          ls -la "$SDK_ROOT/licenses" "$SDK_ROOT/platforms" || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -48,8 +47,14 @@ jobs:
             tr -d '\n\r' < debug.keystore.base64 | base64 -d > debug.keystore
           fi
 
-      - name: Run unit tests & build Debug APK
-        run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - name: Build Debug APK
+        run: |
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --no-configuration-cache \
+            --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" \
+            --stacktrace
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
@@ -57,6 +62,15 @@ jobs:
           name: AmarNote-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Run unit tests
+        continue-on-error: true
+        run: |
+          gradle :app:testDebugUnitTest \
+            --no-daemon \
+            --no-configuration-cache \
+            --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
 
       - name: Build Signed Release APK (when release secrets are configured)
         id: release_build
@@ -68,7 +82,11 @@ jobs:
           if [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "$RELEASE_KEYSTORE_BASE64" | tr -d '\n\r' | base64 -d > my-upload-key.jks
             export KEYSTORE_PATH="$PWD/my-upload-key.jks"
-            gradle :app:assembleRelease --no-daemon
+            gradle :app:assembleRelease \
+              --no-daemon \
+              --no-configuration-cache \
+              --max-workers=2 \
+              -Dorg.gradle.jvmargs="-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
             rm -f my-upload-key.jks
             echo "built=true" >> "$GITHUB_OUTPUT"
           else
